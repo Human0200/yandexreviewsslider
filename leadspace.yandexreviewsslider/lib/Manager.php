@@ -86,6 +86,7 @@ final class Manager
         ?string $sortColumn = null,
         ?string $sortOrder = null,
     ): EO_Reviews_Collection {
+        file_put_contents(__DIR__.'/test.txt', 'getReviewsForComponent| ', FILE_APPEND);
         $queryBuilder = $this->reviewsTable::query()
                                         ->setSelect(['*'])
                                         ->setLimit($limit);
@@ -117,6 +118,7 @@ final class Manager
      */
     public function getCompanyInfoForComponent(): EO_Company
     {
+        file_put_contents(__DIR__.'/test.txt', 'getCompanyInfoForComponent',    FILE_APPEND);
         return $this->companyTable::getList()->fetchObject();
     }
 
@@ -125,6 +127,7 @@ final class Manager
      */
     public function getCompanyReviewsPageUrl(): string
     {
+        file_put_contents(__DIR__.'/test.txt', 'getCompanyReviewsPageUrl| ', FILE_APPEND);
         $companyId = $this->bitrixModuleOptions->get('leadspace.yandexreviewsslider', 'company_id');
 
         return self::COMPANY_YANDEX_MAPS_REVIEWS_PAGE_BASE_URL.'/'.$companyId.'/reviews/';
@@ -135,6 +138,7 @@ final class Manager
      */
     public function getUrlForAddReview(): string
     {
+        file_put_contents(__DIR__.'/test.txt', 'getUrlForAddReview| ', FILE_APPEND);
         return $this->getCompanyReviewsPageUrl().'?add-review=true';
     }
 
@@ -143,6 +147,7 @@ final class Manager
      */
     public function requiredToHideLogoInComponent(): bool
     {
+        file_put_contents(__DIR__.'/test.txt', 'requiredToHideLogoInComponent| ', FILE_APPEND);
         return 'Y' === $this->bitrixModuleOptions->get('leadspace.yandexreviewsslider', 'hide_logo');
     }
 
@@ -152,6 +157,7 @@ final class Manager
      */
     private function checkRequiredModuleParams(): void
     {
+        file_put_contents(__DIR__.'/test.txt', 'checkRequiredModuleParams| ', FILE_APPEND);
         $companyId = $this->bitrixModuleOptions->get('leadspace.yandexreviewsslider', 'company_id');
 
         if (0 === intval($companyId)) {
@@ -172,8 +178,8 @@ final class Manager
         $latestCompanyInfoResponse = $this->requestLatestCompanyInfo();
 
         $this->checkCompanyInfoResponse($latestCompanyInfoResponse);
-
         $this->overwriteCompanyInfo($latestCompanyInfoResponse);
+        file_put_contents(__DIR__.'/test.txt', 'fullCompanyInfoOverwrite| end| ', FILE_APPEND);
     }
 
     /**
@@ -183,18 +189,130 @@ final class Manager
      *
      * @throws ParsingRequestTimeout произошёл таймаут
      */
-    private function makeRequestWithHandleTimeout(string $method, string $url, array $options = []): ResponseInterface
-    {
-        try {
-            return $this->httpClient->request(
-                $method,
-                $url,
-                $options
-            );
-        } catch (TimeoutException) {
-            throw new ParsingRequestTimeout($this->localization->getMessage('LEADSPACE_YANDEXREVIEWSSLIDER_PARSING_REQUEST_TIMEOUT'));
+private function makeRequestWithHandleTimeout(string $method, string $url, array $options = []): ResponseInterface
+{
+    $startTime = microtime(true);
+    
+    try {
+        $response = $this->httpClient->request(
+            $method,
+            $url,
+            $options
+        );
+        
+        $responseTime = microtime(true) - $startTime;
+        $statusCode = $response->getStatusCode();
+        $content = $response->getContent(false); // false - не бросать исключение при ошибке
+        $headers = $response->getHeaders();
+        
+        // Логирование успешного запроса с деталями ответа
+        $logData = [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'method' => $method,
+            'url' => $url,
+            'status' => 'success',
+            'status_code' => $statusCode,
+            'response_time' => round($responseTime, 3) . 's',
+            'headers' => $this->getHeadersSummary($headers),
+            'body_length' => strlen($content),
+            'content_type' => $headers['content-type'][0] ?? 'unknown',
+        ];
+        
+        // Добавляем превью тела для отладки (только для текстовых типов контента)
+        if ($this->isTextContent($headers['content-type'][0] ?? '')) {
+            $logData['body_preview'] = substr($content, 0, 200) . (strlen($content) > 200 ? '...' : '');
+        }
+        
+        file_put_contents(__DIR__ . '/request_log.txt', json_encode($logData, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . PHP_EOL, FILE_APPEND);
+        
+        return $response;
+        
+    } catch (TimeoutException $e) {
+        $responseTime = microtime(true) - $startTime;
+        
+        // Логирование таймаута
+        $logData = [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'method' => $method,
+            'url' => $url,
+            'status' => 'timeout',
+            'response_time' => round($responseTime, 3) . 's',
+            'error' => 'Request timeout exceeded',
+            'error_message' => $e->getMessage()
+        ];
+        
+        file_put_contents(__DIR__ . '/request_log.txt', json_encode($logData, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . PHP_EOL, FILE_APPEND);
+        
+        throw new ParsingRequestTimeout($this->localization->getMessage('LEADSPACE_YANDEXREVIEWSSLIDER_PARSING_REQUEST_TIMEOUT'));
+    } catch (\Exception $e) {
+        $responseTime = microtime(true) - $startTime;
+        
+        // Логирование других ошибок
+        $logData = [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'method' => $method,
+            'url' => $url,
+            'status' => 'error',
+            'response_time' => round($responseTime, 3) . 's',
+            'error' => $e->getMessage(),
+            'error_type' => get_class($e),
+            'error_trace' => $this->getShortTrace($e)
+        ];
+        
+        file_put_contents(__DIR__ . '/request_log.txt', json_encode($logData, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . PHP_EOL, FILE_APPEND);
+        
+        throw $e;
+    }
+}
+
+private function getHeadersSummary(array $headers): array
+{
+    file_put_contents(__DIR__.'/test.txt', 'getHeadersSummary| ', FILE_APPEND);
+    $summary = [];
+    foreach ($headers as $name => $values) {
+        $summary[$name] = is_array($values) ? implode(', ', $values) : $values;
+    }
+    return $summary;
+}
+
+private function isTextContent(string $contentType): bool
+{
+    file_put_contents(__DIR__.'/test.txt', 'isTextContent| ', FILE_APPEND);
+    $textTypes = [
+        'text/',
+        'application/json',
+        'application/xml',
+        'application/xhtml+xml',
+        'application/javascript',
+        'application/x-www-form-urlencoded'
+    ];
+    
+    foreach ($textTypes as $textType) {
+        if (strpos($contentType, $textType) === 0) {
+            return true;
         }
     }
+    
+    return false;
+}
+
+private function getShortTrace(\Exception $e): array
+{
+    file_put_contents(__DIR__.'/test.txt', 'getShortTrace| ', FILE_APPEND);
+    $trace = $e->getTrace();
+    $shortTrace = [];
+    
+    // Берем только первые 3 элемента трейса для логирования
+    for ($i = 0; $i < min(3, count($trace)); $i++) {
+        $shortTrace[] = [
+            'file' => $trace[$i]['file'] ?? 'unknown',
+            'line' => $trace[$i]['line'] ?? 'unknown',
+            'function' => $trace[$i]['function'] ?? 'unknown'
+        ];
+    }
+    
+    return $shortTrace;
+}
 
     /**
      * Запрашивает информацию о компании с Яндекс Карт.
@@ -203,6 +321,7 @@ final class Manager
      */
     private function requestLatestCompanyInfo(): ResponseInterface
     {
+        file_put_contents(__DIR__.'/test.txt', 'requestLatestCompanyInfo| ', FILE_APPEND);
         $companyId = $this->bitrixModuleOptions->get('leadspace.yandexreviewsslider', 'company_id');
 
         return $this->makeRequestWithHandleTimeout(
@@ -223,9 +342,10 @@ final class Manager
      */
     private function checkStatusCode(ResponseInterface $response): void
     {
+        
         try {
             $response->getHeaders();
-
+            file_put_contents(__DIR__.'/test.txt', 'checkStatusCode| '. $response->getStatusCode().'| ', FILE_APPEND);
             // Дополнительно проверить статус код, потому что исключение
             // ClientExceptionInterface или ServerExceptionInterface
             // может быть не вызвано, при указании соответствующей опции HTTP-запроса.
@@ -244,73 +364,280 @@ final class Manager
      *
      * @throws ParsingInvalidBody Если не удалось извлечь необходимые данные из тела запроса
      */
-    private function checkCompanyInfoResponse(ResponseInterface $companyInfoResponse): void
-    {
-        $this->checkStatusCode($companyInfoResponse);
+private function checkCompanyInfoResponse(ResponseInterface $companyInfoResponse): void
+{
+    file_put_contents(__DIR__.'/test.txt', 'checkCompanyInfoResponse| ', FILE_APPEND);
+    $this->checkStatusCode($companyInfoResponse);
 
-        $invalidBodyErrorMessage = $this->localization->getMessage(
-            'LEADSPACE_YANDEXREVIEWSSLIDER_PARSING_INVALID_BODY'
-        );
+    $invalidBodyErrorMessage = $this->localization->getMessage(
+        'LEADSPACE_YANDEXREVIEWSSLIDER_PARSING_INVALID_BODY'
+    );
 
-        $contentType = $companyInfoResponse->getHeaders()['content-type'][0] ?? '';
+    $content = $companyInfoResponse->getContent();
+    $contentType = $companyInfoResponse->getHeaders()['content-type'][0] ?? '';
+    file_put_contents(__DIR__.'/test.txt', 'contentType: ' . $contentType . '| ', FILE_APPEND);
 
-        if (!str_starts_with($contentType, 'text/html')) {
-            throw new ParsingInvalidBody($invalidBodyErrorMessage);
-        }
+    // Сохраняем содержимое для отладки
+    file_put_contents(__DIR__.'/debug_company_page.html', $content);
 
-        try {
-            $crawler = new Crawler($companyInfoResponse->getContent());
-
-            $crawler->filter('h1.orgpage-header-view__header')->text();
-            preg_replace(
-                '/[^0-9,]+/',
-                '',
-                $crawler->filter('div.business-summary-rating-badge-view__rating')->text()
-            );
-
-            $crawler->filter('.card-section-header__title')->text();
-            $crawler->filter('.business-rating-amount-view._summary')->text();
-        } catch (\InvalidArgumentException) {
-            throw new ParsingInvalidBody($invalidBodyErrorMessage);
-        }
+    // Проверяем на наличие капчи
+    if (strpos($content, 'SmartCaptcha') !== false || 
+        strpos($content, 'confirm you are not a robot') !== false ||
+        strpos($content, 'подтвердите, что запросы отправляли вы') !== false) {
+        file_put_contents(__DIR__.'/test.txt', 'CAPTCHA_DETECTED| ', FILE_APPEND);
+        throw new ParsingInvalidBody($this->localization->getMessage('LEADSPACE_YANDEXREVIEWSSLIDER_CAPTCHA_DETECTED'));
     }
+
+    if (!str_starts_with($contentType, 'text/html')) {
+        file_put_contents(__DIR__.'/test.txt', 'NOT_HTML_CONTENT| ', FILE_APPEND);
+        throw new ParsingInvalidBody($invalidBodyErrorMessage);
+    }
+
+    try {
+        $crawler = new Crawler($companyInfoResponse->getContent());
+        file_put_contents(__DIR__.'/test.txt', 'crawler_created| ', FILE_APPEND);
+
+        // Проверка заголовка h1 - несколько возможных селекторов
+        $h1Selectors = [
+            'h1.orgpage-header-view__header',
+            'h1.card-title-view__title',
+            'h1', // fallback на любой h1
+            '.orgpage-header-view__header', // может быть div вместо h1
+            '.card-title-view__title', // альтернативный селектор
+        ];
+        
+        $h1Found = false;
+        $h1Text = '';
+        
+        foreach ($h1Selectors as $selector) {
+            if ($crawler->filter($selector)->count() > 0) {
+                $h1Text = $crawler->filter($selector)->text();
+                $h1Found = true;
+                file_put_contents(__DIR__.'/test.txt', 'h1_found_via_' . $selector . ': ' . substr($h1Text, 0, 50) . '| ', FILE_APPEND);
+                break;
+            }
+        }
+        
+        if (!$h1Found) {
+            file_put_contents(__DIR__.'/test.txt', 'H1_NOT_FOUND| ', FILE_APPEND);
+            // Проверим другие признаки существования компании
+            $companyNameSelectors = [
+                '[data-org-name]',
+                '.business-card-title-view__title',
+                '.orgpage-name',
+                '.organization-name',
+            ];
+            
+            foreach ($companyNameSelectors as $selector) {
+                if ($crawler->filter($selector)->count() > 0) {
+                    $h1Text = $crawler->filter($selector)->text();
+                    $h1Found = true;
+                    file_put_contents(__DIR__.'/test.txt', 'company_name_found_via_' . $selector . ': ' . substr($h1Text, 0, 50) . '| ', FILE_APPEND);
+                    break;
+                }
+            }
+            
+            if (!$h1Found) {
+                file_put_contents(__DIR__.'/test.txt', 'NO_COMPANY_NAME_FOUND| ', FILE_APPEND);
+                throw new ParsingInvalidBody($invalidBodyErrorMessage);
+            }
+        }
+
+        // Проверка рейтинга - если не найден, возвращаем 5
+        $rating = '5'; // значение по умолчанию
+        $ratingFound = false;
+        $ratingSelectors = [
+            'div.business-summary-rating-badge-view__rating',
+            '.business-rating-badge-view__rating-text',
+            '.business-rating-view__rating',
+            '[data-rating]',
+            '.rating-value',
+            // добавьте другие возможные селекторы рейтинга
+        ];
+        
+        foreach ($ratingSelectors as $selector) {
+            if ($crawler->filter($selector)->count() > 0) {
+                try {
+                    $ratingText = $crawler->filter($selector)->text();
+                    $rating = preg_replace('/[^0-9,]+/', '', $ratingText);
+                    file_put_contents(__DIR__.'/test.txt', 'rating_found_via_' . $selector . ': ' . $rating . '| ', FILE_APPEND);
+                    $ratingFound = true;
+                    break;
+                } catch (\Exception $e) {
+                    file_put_contents(__DIR__.'/test.txt', 'rating_error_' . $selector . ': ' . $e->getMessage() . '| ', FILE_APPEND);
+                    continue;
+                }
+            }
+        }
+        
+        if (!$ratingFound) {
+            file_put_contents(__DIR__.'/test.txt', 'RATING_NOT_FOUND_USING_DEFAULT_5| ', FILE_APPEND);
+        }
+
+        // Проверка заголовка секции с несколькими селекторами
+        $sectionFound = false;
+        $sectionSelectors = [
+            '.card-section-header__title._wide',
+            '.card-section-header__title',
+            '.reviews-section-title',
+            '.section-header-title',
+            'h2', // fallback на любой h2
+        ];
+        
+        foreach ($sectionSelectors as $selector) {
+            if ($crawler->filter($selector)->count() > 0) {
+                try {
+                    $sectionTitle = $crawler->filter($selector)->text();
+                    file_put_contents(__DIR__.'/test.txt', 'section_title_via_' . $selector . ': ' . $sectionTitle . '| ', FILE_APPEND);
+                    $sectionFound = true;
+                    break;
+                } catch (\Exception $e) {
+                    file_put_contents(__DIR__.'/test.txt', 'section_error_' . $selector . ': ' . $e->getMessage() . '| ', FILE_APPEND);
+                    continue;
+                }
+            }
+        }
+        
+        if (!$sectionFound) {
+            file_put_contents(__DIR__.'/test.txt', 'SECTION_TITLE_NOT_FOUND| ', FILE_APPEND);
+        }
+
+        // Проверка количества отзывов
+        $reviewsCount = null;
+        $reviewsSelectors = [
+            '.business-rating-amount-view._summary',
+            '.business-rating-amount-view',
+            '.reviews-count',
+            '.rating-count',
+            '[data-review-count]',
+            '[data-reviews-count]',
+            // добавьте другие возможные селекторы количества отзывов
+        ];
+        
+        foreach ($reviewsSelectors as $selector) {
+            if ($crawler->filter($selector)->count() > 0) {
+                try {
+                    $reviewsCount = $crawler->filter($selector)->text();
+                    file_put_contents(__DIR__.'/test.txt', 'reviews_found_via_' . $selector . ': ' . $reviewsCount . '| ', FILE_APPEND);
+                    break;
+                } catch (\Exception $e) {
+                    file_put_contents(__DIR__.'/test.txt', 'reviews_error_' . $selector . ': ' . $e->getMessage() . '| ', FILE_APPEND);
+                    continue;
+                }
+            }
+        }
+        
+        if ($reviewsCount === null) {
+            file_put_contents(__DIR__.'/test.txt', 'REVIEWS_COUNT_NOT_FOUND| ', FILE_APPEND);
+        }
+
+    } catch (\InvalidArgumentException $e) {
+        file_put_contents(__DIR__.'/test.txt', 'InvalidArgumentException: ' . $e->getMessage() . '| ', FILE_APPEND);
+        throw new ParsingInvalidBody($invalidBodyErrorMessage);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'GeneralException: ' . $e->getMessage() . '| ', FILE_APPEND);
+        throw new ParsingInvalidBody($invalidBodyErrorMessage);
+    }
+    
+    file_put_contents(__DIR__.'/test.txt', 'checkCompanyInfoResponse_success| ', FILE_APPEND);
+}
 
     /**
      * Непосредственно перезаписывает информацию о компании в БД актуальными данными.
      *
      * @param ResponseInterface $companyInfoResponse Ответ на запрос информации о компании
      */
-    private function overwriteCompanyInfo(ResponseInterface $companyInfoResponse): void
-    {
-        $crawler = new Crawler($companyInfoResponse->getContent());
+private function overwriteCompanyInfo(ResponseInterface $companyInfoResponse): void
+{
+    file_put_contents(__DIR__.'/test.txt', 'overwriteCompanyInfo| ', FILE_APPEND);
+    $crawler = new Crawler($companyInfoResponse->getContent());
+    file_put_contents(__DIR__.'/test.txt', 'crawler_created| ', FILE_APPEND);
 
+    try {
+        // Логируем название компании
         $companyName = $crawler->filter('h1.orgpage-header-view__header')->text();
-        $companyRating = preg_replace(
-            '/[^0-9,]+/',
-            '',
-            $crawler->filter('div.business-summary-rating-badge-view__rating')->text()
-        );
+        file_put_contents(__DIR__.'/test.txt', 'company_name: ' . $companyName . '| ', FILE_APPEND);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'company_name_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        throw $e;
+    }
 
+    try {
+        // Логируем рейтинг
+        $ratingText = $crawler->filter('div.business-summary-rating-badge-view__rating')->text();
+        file_put_contents(__DIR__.'/test.txt', 'rating_raw: ' . $ratingText . '| ', FILE_APPEND);
+        
+        $companyRating = preg_replace('/[^0-9,]+/', '', $ratingText);
+        file_put_contents(__DIR__.'/test.txt', 'rating_cleaned: ' . $companyRating . '| ', FILE_APPEND);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'rating_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        // Используем значение по умолчанию как в checkCompanyInfoResponse
+        $companyRating = '5';
+        file_put_contents(__DIR__.'/test.txt', 'using_default_rating: ' . $companyRating . '| ', FILE_APPEND);
+    }
+
+    // Логируем звезды
+    try {
         $fullStarsCount = $crawler
             ->filter('.business-summary-rating-badge-view__stars-and-count .business-rating-badge-view__star._full')
             ->count();
+        file_put_contents(__DIR__.'/test.txt', 'full_stars: ' . $fullStarsCount . '| ', FILE_APPEND);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'full_stars_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        $fullStarsCount = 0;
+    }
+
+    try {
         $halfStarsCount = $crawler
             ->filter('.business-summary-rating-badge-view__stars-and-count .business-rating-badge-view__star._half')
             ->count();
+        file_put_contents(__DIR__.'/test.txt', 'half_stars: ' . $halfStarsCount . '| ', FILE_APPEND);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'half_stars_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        $halfStarsCount = 0;
+    }
+
+    try {
         $emptyStarsCount = $crawler
             ->filter('.business-summary-rating-badge-view__stars-and-count .business-rating-badge-view__star._empty')
             ->count();
+        file_put_contents(__DIR__.'/test.txt', 'empty_stars: ' . $emptyStarsCount . '| ', FILE_APPEND);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'empty_stars_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        $emptyStarsCount = 0;
+    }
 
-        $countReviews = $crawler
-          ->filter('.card-section-header__title')
-          ->text();
-        $countMarks = $crawler
-          ->filter('.business-rating-amount-view._summary')
-          ->text();
+    // Логируем количество отзывов
+    try {
+        $countReviews = $crawler->filter('.card-section-header__title')->text();
+        file_put_contents(__DIR__.'/test.txt', 'count_reviews_raw: ' . $countReviews . '| ', FILE_APPEND);
+        
+        // Извлекаем только цифры из текста "1 отзыв"
+        $countReviews = preg_replace('/[^0-9]+/', '', $countReviews);
+        file_put_contents(__DIR__.'/test.txt', 'count_reviews_cleaned: ' . $countReviews . '| ', FILE_APPEND);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'count_reviews_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        $countReviews = '0';
+    }
 
-        // Получить виртуальный класс объекта.
-        $companyObject = new ($this->companyTable::getObjectClass());
+    // Логируем количество оценок
+    try {
+        $countMarks = $crawler->filter('.business-rating-amount-view._summary')->text();
+        file_put_contents(__DIR__.'/test.txt', 'count_marks_raw: ' . $countMarks . '| ', FILE_APPEND);
+        
+        // Извлекаем только цифры
+        $countMarks = preg_replace('/[^0-9]+/', '', $countMarks);
+        file_put_contents(__DIR__.'/test.txt', 'count_marks_cleaned: ' . $countMarks . '| ', FILE_APPEND);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'count_marks_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        $countMarks = '0';
+    }
 
+    // Логируем создание объекта
+    file_put_contents(__DIR__.'/test.txt', 'creating_company_object| ', FILE_APPEND);
+    $companyObject = new ($this->companyTable::getObjectClass());
+
+    try {
         $companyObject
           ->setName($companyName)
           ->setRating($companyRating)
@@ -319,10 +646,30 @@ final class Manager
           ->setEmptyStars($emptyStarsCount)
           ->setCountreviews($countReviews)
           ->setCountmarks($countMarks);
-
-        $this->connection->truncateTable($this->companyTable::getTableName());
-        $companyObject->save();
+        
+        file_put_contents(__DIR__.'/test.txt', 'object_properties_set| ', FILE_APPEND);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'set_properties_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        throw $e;
     }
+
+    // Логируем операции с базой данных
+    try {
+        file_put_contents(__DIR__.'/test.txt', 'truncating_table| ', FILE_APPEND);
+        $this->connection->truncateTable($this->companyTable::getTableName());
+        file_put_contents(__DIR__.'/test.txt', 'table_truncated| ', FILE_APPEND);
+        
+        file_put_contents(__DIR__.'/test.txt', 'saving_object| ', FILE_APPEND);
+        $companyObject->save();
+        file_put_contents(__DIR__.'/test.txt', 'object_saved| ', FILE_APPEND);
+        
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'db_operation_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        throw $e;
+    }
+
+    file_put_contents(__DIR__.'/test.txt', 'overwriteCompanyInfo_success| ', FILE_APPEND);
+}
 
     /**
      * Полностью перезаписывает отзывы о компании.
@@ -332,14 +679,25 @@ final class Manager
      * - Проверяет ответ на наличие необходимых данных.
      * - Перезаписывает отзывы в БД последними (новыми) полученными.
      */
-    private function fullReviewsOverwrite(): void
-    {
+private function fullReviewsOverwrite(): void
+{
+    file_put_contents(__DIR__.'/test.txt', 'fullReviewsOverwrite| start| ', FILE_APPEND);
+    try {
         $latestReviewsResponse = $this->requestLatestReviews();
+        file_put_contents(__DIR__.'/test.txt', 'requestLatestReviews_done| ', FILE_APPEND);
 
         $this->checkReviewsResponse($latestReviewsResponse);
+        file_put_contents(__DIR__.'/test.txt', 'checkReviewsResponse_done| ', FILE_APPEND);
 
         $this->overwriteReviews($latestReviewsResponse);
+        file_put_contents(__DIR__.'/test.txt', 'overwriteReviews_done| ', FILE_APPEND);
+        
+        file_put_contents(__DIR__.'/test.txt', 'fullReviewsOverwrite_success| ', FILE_APPEND);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'fullReviewsOverwrite_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        throw $e;
     }
+}
 
     /**
      * Запрашивает последние отзывы о компании.
@@ -348,6 +706,7 @@ final class Manager
      */
     private function requestLatestReviews(): ResponseInterface
     {
+        file_put_contents(__DIR__.'/test.txt', 'requestLatestReviews| ', FILE_APPEND);
         $companyId = $this->bitrixModuleOptions->get('leadspace.yandexreviewsslider', 'company_id');
 
         return $this->makeRequestWithHandleTimeout(
@@ -372,125 +731,272 @@ final class Manager
      *
      * @throws ParsingInvalidBody в случае отсутствия нужных данных в ответе
      */
-    private function checkReviewsResponse(ResponseInterface $reviewsResponse): void
-    {
-        $this->checkStatusCode($reviewsResponse);
+private function checkReviewsResponse(ResponseInterface $reviewsResponse): void
+{
+    file_put_contents(__DIR__.'/test.txt', 'checkReviewsResponse| ', FILE_APPEND);
+    $this->checkStatusCode($reviewsResponse);
 
-        $invalidBodyErrorMessage = $this->localization->getMessage(
-            'LEADSPACE_YANDEXREVIEWSSLIDER_PARSING_INVALID_BODY'
-        );
+    $invalidBodyErrorMessage = $this->localization->getMessage(
+        'LEADSPACE_YANDEXREVIEWSSLIDER_PARSING_INVALID_BODY'
+    );
 
-        $contentType = $reviewsResponse->getHeaders()['content-type'][0] ?? '';
+    $contentType = $reviewsResponse->getHeaders()['content-type'][0] ?? '';
+    file_put_contents(__DIR__.'/test.txt', 'contentType: ' . $contentType . '| ', FILE_APPEND);
 
-        if (!str_starts_with($contentType, 'application/json')) {
+    // Сохраняем содержимое для отладки
+    $content = $reviewsResponse->getContent();
+    file_put_contents(__DIR__.'/debug_reviews_response.html', $content);
+    file_put_contents(__DIR__.'/test.txt', 'content_length: ' . strlen($content) . '| ', FILE_APPEND);
+
+    if (!str_starts_with($contentType, 'application/json')) {
+        file_put_contents(__DIR__.'/test.txt', 'NOT_JSON_CONTENT| ', FILE_APPEND);
+        
+        // Проверим, может быть это ошибка или капча
+        if (strpos($content, 'captcha') !== false) {
+            file_put_contents(__DIR__.'/test.txt', 'CAPTCHA_DETECTED| ', FILE_APPEND);
+        }
+        if (strpos($content, 'error') !== false) {
+            file_put_contents(__DIR__.'/test.txt', 'ERROR_PAGE| ', FILE_APPEND);
+        }
+        
+        throw new ParsingInvalidBody($invalidBodyErrorMessage);
+    }
+
+    try {
+        $content = $reviewsResponse->getContent();
+        file_put_contents(__DIR__.'/test.txt', 'response_content_length: ' . strlen($content) . '| ', FILE_APPEND);
+        
+        // Сохраняем JSON для отладки
+        file_put_contents(__DIR__.'/debug_reviews.json', $content);
+        
+        $decodedJson = $this->bitrixJson->decode($content);
+        file_put_contents(__DIR__.'/test.txt', 'json_decoded| ', FILE_APPEND);
+
+        if (!is_array($decodedJson)) {
+            file_put_contents(__DIR__.'/test.txt', 'JSON_NOT_ARRAY| ', FILE_APPEND);
             throw new ParsingInvalidBody($invalidBodyErrorMessage);
         }
-
-        try {
-            $decodedJson = $this->bitrixJson->decode($reviewsResponse->getContent());
-
-            if (!is_array($decodedJson)) {
+        
+        // Логируем ключи JSON для отладки
+        $jsonKeys = array_keys($decodedJson);
+        file_put_contents(__DIR__.'/test.txt', 'json_keys: ' . implode(',', $jsonKeys) . '| ', FILE_APPEND);
+        
+        // НОВЫЙ КОД: Проверяем новую структуру с view->views
+        if (!isset($decodedJson['view'])) {
+            file_put_contents(__DIR__.'/test.txt', 'NO_VIEW_KEY| ', FILE_APPEND);
+            // Попробуем старую структуру для обратной совместимости
+            if (!isset($decodedJson['reviews'])) {
                 throw new ParsingInvalidBody($invalidBodyErrorMessage);
             }
-        } catch (ArgumentException) {
-            throw new ParsingInvalidBody($invalidBodyErrorMessage);
-        }
+            $reviews = $decodedJson['reviews'];
+        } else {
+            // Новая структура: view->views
+            if (!isset($decodedJson['view']['views'])) {
+                file_put_contents(__DIR__.'/test.txt', 'NO_VIEWS_KEY| ', FILE_APPEND);
+                throw new ParsingInvalidBody($invalidBodyErrorMessage);
+            }
+            
+            $views = $decodedJson['view']['views'];
+            file_put_contents(__DIR__.'/test.txt', 'views_count: ' . count($views) . '| ', FILE_APPEND);
+            
+            if (!is_array($views)) {
+                file_put_contents(__DIR__.'/test.txt', 'VIEWS_NOT_ARRAY| ', FILE_APPEND);
+                throw new ParsingInvalidBody($invalidBodyErrorMessage);
+            }
 
-        if (!is_array($decodedJson['view']['views'])) {
-            throw new ParsingInvalidBody($invalidBodyErrorMessage);
+            // Фильтруем только отзывы (type = "/ugc/review")
+            $reviews = array_filter($views, function($item) {
+                return isset($item['type']) && $item['type'] === '/ugc/review';
+            });
+            
+            $reviews = array_values($reviews);
+            file_put_contents(__DIR__.'/test.txt', 'reviews_after_filter: ' . count($reviews) . '| ', FILE_APPEND);
         }
-
-        $reviews = array_slice($decodedJson['view']['views'], 1, -1);
 
         if (empty($reviews)) {
+            file_put_contents(__DIR__.'/test.txt', 'NO_REVIEWS_FOUND| ', FILE_APPEND);
             throw new ParsingInvalidBody($invalidBodyErrorMessage);
         }
 
-        // Проверить структуру массиав на соответствие ожидамеой.
-        foreach ($reviews as $review) {
+        // Проверить структуру массива на соответствие ожидаемой.
+        foreach ($reviews as $index => $review) {
             $unexpectedStructure = false;
 
             if (!is_array($review)) {
+                file_put_contents(__DIR__.'/test.txt', 'REVIEW_' . $index . '_NOT_ARRAY| ', FILE_APPEND);
                 $unexpectedStructure = true;
             }
 
-            if (!is_string($review['author']['signPrivacy'])) {
+            if (!isset($review['author']) || !is_array($review['author'])) {
+                file_put_contents(__DIR__.'/test.txt', 'REVIEW_' . $index . '_NO_AUTHOR| ', FILE_APPEND);
                 $unexpectedStructure = true;
             }
 
-            if (!is_int($review['rating']['val'])) {
+            if (!isset($review['author']['signPrivacy']) || !is_string($review['author']['signPrivacy'])) {
+                file_put_contents(__DIR__.'/test.txt', 'REVIEW_' . $index . '_NO_SIGNPRIVACY| ', FILE_APPEND);
                 $unexpectedStructure = true;
             }
 
-            if (!is_int($review['time'])) {
+            if (!isset($review['rating']) || !is_array($review['rating']) || !isset($review['rating']['val']) || !is_int($review['rating']['val'])) {
+                file_put_contents(__DIR__.'/test.txt', 'REVIEW_' . $index . '_NO_RATING_VAL| ', FILE_APPEND);
                 $unexpectedStructure = true;
             }
 
-            if (!is_string($review['text'])) {
+            if (!isset($review['time']) || !is_int($review['time'])) {
+                file_put_contents(__DIR__.'/test.txt', 'REVIEW_' . $index . '_NO_TIME| ', FILE_APPEND);
+                $unexpectedStructure = true;
+            }
+
+            if (!isset($review['text']) || !is_string($review['text'])) {
+                file_put_contents(__DIR__.'/test.txt', 'REVIEW_' . $index . '_NO_TEXT| ', FILE_APPEND);
                 $unexpectedStructure = true;
             }
 
             if ($unexpectedStructure) {
+                file_put_contents(__DIR__.'/test.txt', 'REVIEW_' . $index . '_UNEXPECTED_STRUCTURE| ', FILE_APPEND);
                 throw new ParsingInvalidBody($invalidBodyErrorMessage);
             }
         }
+        
+        file_put_contents(__DIR__.'/test.txt', 'checkReviewsResponse_success| ', FILE_APPEND);
+
+    } catch (ArgumentException $e) {
+        file_put_contents(__DIR__.'/test.txt', 'JSON_DECODE_ERROR: ' . $e->getMessage() . '| ', FILE_APPEND);
+        throw new ParsingInvalidBody($invalidBodyErrorMessage);
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'UNEXPECTED_ERROR: ' . $e->getMessage() . '| ', FILE_APPEND);
+        throw new ParsingInvalidBody($invalidBodyErrorMessage);
     }
+}
 
     /**
      * Непосредственно перезаписывает старые отзывы последними (новыми) в БД.
      *
      * @param ResponseInterface ответ на HTTP-запрос последних отзывов
      */
-    private function overwriteReviews(
-        ResponseInterface $response,
-    ): void {
-        $content = $this->bitrixJson->decode($response->getContent())['view']['views'];
-
-        // Обрезать первый и последний элемент массива, т.к. в этих элементах системная информация.
-        $reviews = array_slice($content, 1, -1);
-
-        $reviewsCollection = new ($this->reviewsTable::getCollectionClass());
-
-        foreach ($reviews as $review) {
-            // Получить виртуальный класс объекта и установить ему значения.
-            $reviewsCollection[] = (new ($this->reviewsTable::getObjectClass()))
-                ->setName($this->getCorrectUserName($review['author']))
-                ->setImage($this->getUserAvatarFullUrl($review['author']))
-                ->setRating($review['rating']['val'])
-                ->setData($review['time'] / 1000) // Конвертировать Unix time stamp в мс. в Unix time stamp в секундах.
-                ->setTime($this->getReadableDate($review['time']))
-                ->setDescription($review['text']);
+private function overwriteReviews(ResponseInterface $response): void
+{
+    file_put_contents(__DIR__.'/test.txt', 'overwriteReviews| ', FILE_APPEND);
+    
+    try {
+        $content = $response->getContent();
+        $decoded = $this->bitrixJson->decode($content);
+        file_put_contents(__DIR__.'/test.txt', 'json_decoded| ', FILE_APPEND);
+        
+        // НОВЫЙ КОД: Получаем отзывы из новой или старой структуры
+        if (isset($decoded['view']['views'])) {
+            // Новая структура: view->views
+            $views = $decoded['view']['views'];
+            file_put_contents(__DIR__.'/test.txt', 'views_count: ' . count($views) . '| ', FILE_APPEND);
+            
+            // Фильтруем только отзывы (type = "/ugc/review")
+            $reviews = array_filter($views, function($item) {
+                return isset($item['type']) && $item['type'] === '/ugc/review';
+            });
+            
+            $reviews = array_values($reviews);
+            file_put_contents(__DIR__.'/test.txt', 'reviews_after_filter: ' . count($reviews) . '| ', FILE_APPEND);
+            
+        } elseif (isset($decoded['reviews'])) {
+            // Старая структура: reviews
+            $reviews = $decoded['reviews'];
+            file_put_contents(__DIR__.'/test.txt', 'reviews_count: ' . count($reviews) . '| ', FILE_APPEND);
+            
+            // Обрезать первый и последний элемент массива для старой структуры
+            $reviews = array_slice($reviews, 1, -1);
+            file_put_contents(__DIR__.'/test.txt', 'reviews_after_slice: ' . count($reviews) . '| ', FILE_APPEND);
+            
+        } else {
+            file_put_contents(__DIR__.'/test.txt', 'NO_REVIEWS_IN_JSON| ', FILE_APPEND);
+            throw new \Exception('No reviews found in JSON response');
         }
 
+        if (empty($reviews)) {
+            file_put_contents(__DIR__.'/test.txt', 'NO_REVIEWS_TO_PROCESS| ', FILE_APPEND);
+            throw new \Exception('No reviews to process');
+        }
+
+        $reviewsCollection = new ($this->reviewsTable::getCollectionClass());
+        file_put_contents(__DIR__.'/test.txt', 'collection_created| ', FILE_APPEND);
+
+        foreach ($reviews as $index => $review) {
+            try {
+                $reviewObject = new ($this->reviewsTable::getObjectClass());
+                
+                $userName = $this->getCorrectUserName($review['author']);
+                $avatarUrl = $this->getUserAvatarFullUrl($review['author']);
+                $rating = $review['rating']['val'];
+                $timestamp = $review['time'] / 1000;
+                $readableDate = $this->getReadableDate($review['time']);
+                $text = $review['text'];
+                
+                $reviewObject
+                    ->setName($userName)
+                    ->setImage($avatarUrl)
+                    ->setRating($rating)
+                    ->setData($timestamp)
+                    ->setTime($readableDate)
+                    ->setDescription($text);
+                
+                $reviewsCollection[] = $reviewObject;
+                
+                file_put_contents(__DIR__.'/test.txt', 'review_' . $index . '_added: ' . substr($text, 0, 50) . '| ', FILE_APPEND);
+                
+            } catch (\Exception $e) {
+                file_put_contents(__DIR__.'/test.txt', 'review_' . $index . '_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+                // Продолжаем обработку остальных отзывов
+                continue;
+            }
+        }
+
+        file_put_contents(__DIR__.'/test.txt', 'truncating_reviews_table| ', FILE_APPEND);
         $this->connection->truncateTable($this->reviewsTable::getTableName());
+        file_put_contents(__DIR__.'/test.txt', 'table_truncated| ', FILE_APPEND);
+        
+        file_put_contents(__DIR__.'/test.txt', 'saving_collection| ', FILE_APPEND);
         $reviewsCollection->save();
+        file_put_contents(__DIR__.'/test.txt', 'collection_saved| ', FILE_APPEND);
+        
+        file_put_contents(__DIR__.'/test.txt', 'overwriteReviews_success| ', FILE_APPEND);
+
+    } catch (\Exception $e) {
+        file_put_contents(__DIR__.'/test.txt', 'overwriteReviews_error: ' . $e->getMessage() . '| ', FILE_APPEND);
+        throw $e;
     }
+}
 
     /**
      * Возвращает корректное имя пользователя.
      *
      * В случае, если имя пользователя отсутствует в ответе - возвращается имя по умолчанию.
      */
-    private function getCorrectUserName(array $authorInfo): string
-    {
-        if (!is_string($authorInfo['name'])) {
-            return $this->localization::getMessage('LEADSPACE_YANDEXREVIEWSSLIDER_DEFAULT_NAME_FOR_REVIEWER');
-        }
-
-        return $authorInfo['name'];
+private function getCorrectUserName(array $authorInfo): string
+{
+    file_put_contents(__DIR__.'/test.txt', 'getCorrectUserName| ', FILE_APPEND);
+    if (!isset($authorInfo['name']) || !is_string($authorInfo['name'])) {
+        file_put_contents(__DIR__.'/test.txt', 'using_default_name| ', FILE_APPEND);
+        return $this->localization::getMessage('LEADSPACE_YANDEXREVIEWSSLIDER_DEFAULT_NAME_FOR_REVIEWER');
     }
+
+    file_put_contents(__DIR__.'/test.txt', 'user_name: ' . $authorInfo['name'] . '| ', FILE_APPEND);
+    return $authorInfo['name'];
+}
 
     /**
      * Возращает полный URL для получения аватара пользователя.
      */
-    private function getUserAvatarFullUrl(array $authorInfo): string
-    {
-        if ('' === $authorInfo['pic']) {
-            return '';
-        }
-
-        return self::USER_AVATAR_BASE_URL.'/'.$authorInfo['pic'].'/'.self::USER_AVATAR_SIZE;
+private function getUserAvatarFullUrl(array $authorInfo): string
+{
+    file_put_contents(__DIR__.'/test.txt', 'getUserAvatarFullUrl| ', FILE_APPEND);
+    if (!isset($authorInfo['pic']) || '' === $authorInfo['pic']) {
+        file_put_contents(__DIR__.'/test.txt', 'no_avatar| ', FILE_APPEND);
+        return '';
     }
+
+    $avatarUrl = self::USER_AVATAR_BASE_URL.'/'.$authorInfo['pic'].'/'.self::USER_AVATAR_SIZE;
+    file_put_contents(__DIR__.'/test.txt', 'avatar_url: ' . $avatarUrl . '| ', FILE_APPEND);
+    return $avatarUrl;
+}
 
     /**
      * Генерирует случайные заголовки для HTTP-запроса.
@@ -499,6 +1005,7 @@ final class Manager
      */
     private function generateRandomHeaders(): array
     {
+        file_put_contents(__DIR__.'/test.txt', 'generateRandomHeaders| ', FILE_APPEND);
         $oses = [
             'Windows NT 10.0; Win64; x64',
             'Windows NT 10.0; WOW64',
@@ -545,6 +1052,7 @@ final class Manager
      */
     private function getReadableDate(int $unixTimeStampMs): string
     {
+        file_put_contents(__DIR__.'/test.txt', 'getReadableDate| ', FILE_APPEND);
         $unixTimeStampS = intdiv($unixTimeStampMs, 1000);
 
         $currentYear = (int) date('Y');
